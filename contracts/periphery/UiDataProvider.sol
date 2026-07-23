@@ -80,9 +80,15 @@ contract UiDataProvider {
         StrategyManagerFactory factory = StrategyManagerFactory(_factory);
         address[] memory managers = factory.getUserStrategyManagers(_user);
 
-        StrategyDetailed[] memory userStrategyDetailedArray = new StrategyDetailed[](managers.length);
+        StrategyDetailed[] memory userStrategyDetailedArray = new StrategyDetailed[](managers.length * 2);
+        uint256 j = 0;
         for (uint256 i = 0; i < managers.length; i++){
-            userStrategyDetailedArray[i] = getStrategy(managers[i]);
+            //add normal position
+            userStrategyDetailedArray[j] = getStrategy(managers[i], false);
+            j++;
+            //check if user has any "inverted" positions
+            userStrategyDetailedArray[j] = getStrategy(managers[i], true);
+            j++;
         }
 
         return userStrategyDetailedArray;
@@ -100,7 +106,22 @@ contract UiDataProvider {
         uint256 denominator;
     }
 
-    function getStrategy(address _manager) public view returns (StrategyDetailed memory) {
+    function getStrategy(address _manager, bool _invert) public view returns (StrategyDetailed memory) {
+        StrategyManager manager = StrategyManager(_manager);
+
+        //invert yield and debt asset
+        if (_invert){
+            address yieldAssetAddrInv = manager.debtAsset();
+            address debtAssetAddrInv = manager.yieldAsset();
+            return getStrategy(_manager, yieldAssetAddrInv, debtAssetAddrInv);
+        }
+
+        address yieldAssetAddr = manager.yieldAsset();
+        address debtAssetAddr = manager.debtAsset();
+        return getStrategy(_manager, yieldAssetAddr, debtAssetAddr);
+    }
+
+    function getStrategy(address _manager, address yieldAsset, address debtAsset) public view returns (StrategyDetailed memory) {
         StrategyManager manager = StrategyManager(_manager);
         IPool pool = IPool(manager.pool());
 
@@ -113,20 +134,17 @@ contract UiDataProvider {
 
         LocalVars memory vars;
         {
-            vars.yieldAssetAddr = manager.yieldAsset();
-            vars.debtAssetAddr = manager.debtAsset();
-
-            vars.yieldReserve = pool.getReserveData(vars.yieldAssetAddr);
-            vars.debtReserve = pool.getReserveData(vars.debtAssetAddr);
+            vars.yieldReserve = pool.getReserveData(yieldAsset);
+            vars.debtReserve = pool.getReserveData(debtAsset);
 
             vars.aYieldToken = IAToken(vars.yieldReserve.aTokenAddress);
             vars.variableDebtToken = IAToken(vars.debtReserve.variableDebtTokenAddress);
 
-            vars.debtPrice = oracle.getAssetPrice(vars.debtAssetAddr);
-            vars.yieldPrice = oracle.getAssetPrice(vars.yieldAssetAddr);
+            vars.debtPrice = oracle.getAssetPrice(debtAsset);
+            vars.yieldPrice = oracle.getAssetPrice(yieldAsset);
 
-            yieldValueUsd = vars.aYieldToken.scaledBalanceOf(_manager) * vars.yieldPrice; 
-            debtValueUsd = vars.variableDebtToken.scaledBalanceOf(_manager) * vars.debtPrice;
+            yieldValueUsd = vars.aYieldToken.balanceOf(_manager) * vars.yieldPrice; 
+            debtValueUsd = vars.variableDebtToken.balanceOf(_manager) * vars.debtPrice;
 
             vars.denominator = yieldValueUsd > debtValueUsd ? (yieldValueUsd - debtValueUsd) : 1; 
             leverage = yieldValueUsd / vars.denominator;
@@ -135,8 +153,8 @@ contract UiDataProvider {
         Balances memory balances;
         {
             balances = Balances({
-                debtBalance: vars.variableDebtToken.scaledBalanceOf(_manager),
-                yieldBalance: vars.aYieldToken.scaledBalanceOf(_manager),
+                debtBalance: vars.variableDebtToken.balanceOf(_manager),
+                yieldBalance: vars.aYieldToken.balanceOf(_manager),
                 debtValueUsd: debtValueUsd,
                 yieldValueUsd: yieldValueUsd
             });
@@ -151,16 +169,16 @@ contract UiDataProvider {
         return StrategyDetailed({
             manager: _manager,
             pool: address(pool),
-            yieldAsset: manager.yieldAsset(),
-            debtAsset: manager.debtAsset(),
+            yieldAsset: yieldAsset,
+            debtAsset: debtAsset,
             healthFactor: healthFactor,
             positionValueUsd: positionValueUsd,
             leverage: leverage,
             liquidationThreshold: currentLiquidationThreshold,
             yieldLiquidityRate: vars.yieldReserve.currentLiquidityRate,
             debtVariableBorrowRate: vars.debtReserve.currentVariableBorrowRate,
-            yieldSymbol: IERC20Metadata(manager.yieldAsset()).symbol(),
-            debtSymbol: IERC20Metadata(manager.debtAsset()).symbol(),
+            yieldSymbol: IERC20Metadata(yieldAsset).symbol(),
+            debtSymbol: IERC20Metadata(debtAsset).symbol(),
             balances: balances
         });
     }

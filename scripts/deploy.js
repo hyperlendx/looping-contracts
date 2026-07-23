@@ -13,7 +13,7 @@ async function main(){
     // const contract = await Contract.deploy();
     // console.log(contract.target)
 
-    const Contract = await ethers.getContractFactory("wHlpZapper");
+    const Contract = await ethers.getContractFactory("UiDataProvider");
     const contract = await Contract.deploy();
     console.log(contract.target)
 }
